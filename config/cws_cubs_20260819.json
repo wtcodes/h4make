@@ -1,0 +1,44 @@
+{
+  "market": {
+    "reviewed": true,
+    "scheduled_start_utc": "2026-08-19T18:20:00Z",
+    "canonical_yes": "Chicago White Sox",
+    "canonical_no": "Chicago Cubs",
+    "hip4": {
+      "outcome_id": 13269,
+      "canonical_yes_side": 0,
+      "quote_token": "USDC"
+    },
+    "references": {
+	"kalshi": {
+	    "enabled": true,
+        "weight": 1.0,
+        "market_ticker": "KXMLBGAME-26AUG191420CWSCHC-CWS",
+        "canonical_yes_side": "yes"
+      },
+	"polymarket": {
+	    "enabled": false,
+        "weight": 1.0,
+        "market_slug": "mlb-cws-chc-2026-08-19",
+        "canonical_yes_outcome": "Chicago White Sox"
+      }
+    }
+  },
+  "risk": {
+    "startup_complete_sets": "100",
+    "min_free_quote": "25",
+    "max_position": "100"
+  },
+  "trader": {
+    "basis_sample_interval_s": 2,
+    "basis_ema_tdc_s": 120,
+    "basis_apply_fraction": 0.0,
+    "place_thresh": 0.02,
+    "cancel_thresh": 0.02,
+    "order_size": "25",
+    "max_back_levels": 3,
+    "place_back_levels": true,
+    "rung_thresh_mult": 1.0,
+    "poll_interval_ms": 1000
+  }
+}

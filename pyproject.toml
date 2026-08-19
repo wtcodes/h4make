@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hip4maker"
+version = "0.1.0"
+description = "Self-contained HIP-4 relative-value market maker"
+readme = "README.txt"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = [
+    "cryptography>=42,<50",
+    "eth-account>=0.10,<0.14",
+    "hyperliquid-python-sdk>=0.23,<0.25",
+    "websocket-client>=1.8,<2",
+]
+
+[project.scripts]
+hip4maker = "hip4maker.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

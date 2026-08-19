@@ -1,0 +1,44 @@
+{
+  "market": {
+    "reviewed": false,
+    "scheduled_start_utc": null,
+    "canonical_yes": null,
+    "canonical_no": null,
+    "hip4": {
+      "outcome_id": null,
+      "canonical_yes_side": null,
+      "quote_token": null
+    },
+    "references": {
+      "kalshi": {
+        "enabled": true,
+        "weight": 1.0,
+        "market_ticker": null,
+        "canonical_yes_side": null
+      },
+      "polymarket": {
+        "enabled": false,
+        "weight": 1.0,
+        "market_slug": null,
+        "canonical_yes_outcome": null
+      }
+    }
+  },
+  "risk": {
+    "startup_complete_sets": "100",
+    "min_free_quote": "25",
+    "max_position": "100"
+  },
+  "trader": {
+    "basis_sample_interval_s": 2,
+    "basis_ema_tdc_s": 120,
+    "basis_apply_fraction": 0.8,
+    "place_thresh": 0.02,
+    "cancel_thresh": 0.01,
+    "order_size": "25",
+    "max_back_levels": 3,
+    "place_back_levels": true,
+    "rung_thresh_mult": 1.0,
+    "poll_interval_ms": 1000
+  }
+}
