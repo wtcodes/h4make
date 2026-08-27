@@ -1,20 +1,20 @@
 {
   "market": {
-    "reviewed": false,
-    "scheduled_start_utc": null,
-    "canonical_yes": null,
-    "canonical_no": null,
+    "reviewed": true,
+    "scheduled_start_utc": "2026-08-27T19:00:00Z",
+    "canonical_yes": "Athletic Club",
+    "canonical_no": "Barcelona",
     "hip4": {
-      "outcome_id": null,
-      "canonical_yes_side": null,
-      "quote_token": null
+      "outcome_id": 14566,
+      "canonical_yes_side": 0,
+      "quote_token": "USDC"
     },
     "references": {
       "kalshi": {
         "enabled": true,
         "weight": 1.0,
-        "market_ticker": null,
-        "canonical_yes_side": null
+        "market_ticker": "KXLALIGAGAME-26AUG27BARATH-ATH",
+        "canonical_yes_side": "yes"
       },
       "polymarket": {
         "enabled": false,
@@ -32,7 +32,7 @@
   "trader": {
     "basis_sample_interval_s": 2,
     "basis_ema_tdc_s": 120,
-    "basis_apply_fraction": 0.8,
+    "basis_apply_fraction": 0.1,
     "place_thresh": 0.02,
     "cancel_thresh": 0.01,
     "order_size": "25",
