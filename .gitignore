@@ -1,2 +1,6 @@
 __pycache__/
 *.py[cod]
+
+# Market-specific launch wrappers: contain local paths and credential file
+# locations, so they stay out of version control. The generic run.sh is tracked.
+run_*.sh
