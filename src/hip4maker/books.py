@@ -89,6 +89,30 @@ class CanonicalBook(TopOfBook):
             raise BookError("canonical book mapping_id is required")
 
 
+def shift_canonical_book(book: "CanonicalBook", delta: Decimal) -> "CanonicalBook":
+    """Return the book with both sides shifted by ``delta``, clamped to [0, 1].
+
+    Folds an external additive adjustment (such as a tie-settlement premium) into
+    a canonical reference while preserving its spread, sizes, and identity. The
+    ask is clamped into [0, 1] first, then the bid into [0, ask], so the result
+    still satisfies 0 <= bid <= ask <= 1.
+    """
+
+    ask = min(ONE, max(ZERO, book.ask + delta))
+    bid = min(ask, max(ZERO, book.bid + delta))
+    return CanonicalBook(
+        bid=bid,
+        ask=ask,
+        bid_size=book.bid_size,
+        ask_size=book.ask_size,
+        source_ts_ms=book.source_ts_ms,
+        received_ts_ms=book.received_ts_ms,
+        source=book.source,
+        market_id=book.market_id,
+        mapping_id=book.mapping_id,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class BidLevel:
     price: Decimal

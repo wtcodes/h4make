@@ -92,6 +92,8 @@ MARKET_FIELDS = {
 }
 HIP4_FIELDS = {"outcome_id", "canonical_yes_side", "quote_token"}
 KALSHI_FIELDS = {"enabled", "weight", "market_ticker", "canonical_yes_side"}
+# Optional tie-aware translation fields: allowed but not required.
+KALSHI_OPTIONAL_FIELDS = {"tie_market_ticker", "tie_settlement_fraction"}
 POLYMARKET_FIELDS = {"enabled", "weight", "market_slug", "canonical_yes_outcome"}
 RISK_FIELDS = {"startup_complete_sets", "min_free_quote", "max_position"}
 TRADER_FIELDS = {
@@ -127,11 +129,13 @@ class _Validator:
         fields: set[str],
         *,
         require_all: bool = True,
+        optional: set[str] = frozenset(),
     ) -> Mapping[str, Any] | None:
         if not isinstance(value, dict):
             self.error(path, "must be an object")
             return None
-        for key in sorted(set(value) - fields):
+        allowed = fields | optional
+        for key in sorted(set(value) - allowed):
             self.error(f"{path}.{key}", "unknown field")
         if require_all:
             for key in sorted(fields - set(value)):
@@ -257,7 +261,12 @@ def _validate_market(v: _Validator, value: Any, path: str) -> None:
         v.error(f"{path}.references", "must contain kalshi and/or polymarket")
     enabled_count = 0
     if "kalshi" in references:
-        ref = v.object(references["kalshi"], f"{path}.references.kalshi", KALSHI_FIELDS)
+        ref = v.object(
+            references["kalshi"],
+            f"{path}.references.kalshi",
+            KALSHI_FIELDS,
+            optional=KALSHI_OPTIONAL_FIELDS,
+        )
         if ref is not None:
             enabled = v.boolean(
                 ref.get("enabled"), f"{path}.references.kalshi.enabled"
@@ -281,6 +290,25 @@ def _validate_market(v: _Validator, value: Any, path: str) -> None:
                         f"{path}.references.kalshi.canonical_yes_side",
                         "must be yes or no",
                     )
+                # Optional tie-aware translation: fold P(tie) from a sibling
+                # Kalshi market into canonical YES as win + fraction * P(tie).
+                if ref.get("tie_market_ticker") is not None:
+                    v.string(
+                        ref.get("tie_market_ticker"),
+                        f"{path}.references.kalshi.tie_market_ticker",
+                    )
+                fraction = ref.get("tie_settlement_fraction")
+                if fraction is not None:
+                    parsed_fraction = v.number(
+                        fraction,
+                        f"{path}.references.kalshi.tie_settlement_fraction",
+                        nonnegative=True,
+                    )
+                    if parsed_fraction is not None and parsed_fraction > 1:
+                        v.error(
+                            f"{path}.references.kalshi.tie_settlement_fraction",
+                            "must be within [0, 1]",
+                        )
     if "polymarket" in references:
         ref = v.object(
             references["polymarket"],

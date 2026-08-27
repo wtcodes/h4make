@@ -28,7 +28,7 @@ from hip4maker.actions import (
 )
 from hip4maker.account_stream import AccountStreamEvent, HyperliquidAccountStream
 from hip4maker.basis import BasisEstimator, SampleStatus
-from hip4maker.books import CanonicalBook, ONE
+from hip4maker.books import CanonicalBook, ONE, shift_canonical_book
 from hip4maker.clients import (
     KALSHI_REST_URL,
     POLYMARKET_CLOB_URL,
@@ -42,6 +42,7 @@ from hip4maker.config import basis_parameters_from_config, validate_config
 from hip4maker.hip4 import outcome_asset_id, outcome_coin
 from hip4maker.metadata import (
     VerifiedHip4Contract,
+    discover_kalshi,
     verify_hip4_contract,
     verify_kalshi_reference,
     verify_polymarket_reference,
@@ -202,6 +203,12 @@ class MarketMakerBot:
                 client = KalshiReadOnlyClient.create(KALSHI_REST_URL, self.transport)
                 market = client.market(reference["market_ticker"])
                 verified = verify_kalshi_reference(market.payload, reference, self.mapping)
+                # Fail fast if a tie-aware translation names an unknown market.
+                tie_ticker = reference.get("tie_market_ticker")
+                if tie_ticker:
+                    discover_kalshi(
+                        client.market(tie_ticker).payload, market_ticker=tie_ticker
+                    )
                 if self.kalshi_credentials is not None and self.kalshi_stream is None:
                     try:
                         self.kalshi_stream = KalshiOrderbookStream.from_credentials_file(
@@ -451,6 +458,21 @@ class MarketMakerBot:
                             "transport": transport,
                         },
                     )
+                # Tie-aware translation: a HIP-4 outcome that settles a draw at
+                # a fixed payout per side is worth win + fraction * P(tie), but the
+                # win-only reference market omits that premium. Fold in P(tie) from
+                # the sibling market by shifting the whole book up by that amount.
+                tie_ticker = reference.get("tie_market_ticker")
+                if tie_ticker:
+                    fraction = Decimal(
+                        str(reference.get("tie_settlement_fraction", "0.5"))
+                    )
+                    tie_book = runtime.client.orderbook(
+                        tie_ticker,
+                        canonical_yes_source_side="yes",
+                        mapping_id=self.contract.mapping_id,
+                    )
+                    book = shift_canonical_book(book, fraction * tie_book.midpoint)
             else:
                 assert isinstance(runtime.client, PolymarketReadOnlyClient)
                 book = runtime.client.orderbook(

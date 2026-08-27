@@ -14,7 +14,9 @@
         "enabled": true,
         "weight": 1.0,
         "market_ticker": "KXLALIGAGAME-26AUG27BARATH-ATH",
-        "canonical_yes_side": "yes"
+        "canonical_yes_side": "yes",
+        "tie_market_ticker": "KXLALIGAGAME-26AUG27BARATH-TIE",
+        "tie_settlement_fraction": 0.5
       },
       "polymarket": {
         "enabled": false,
