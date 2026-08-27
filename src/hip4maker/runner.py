@@ -348,11 +348,28 @@ class MarketMakerBot:
         local_coin = outcome_coin(
             self.contract.outcome_id, self.contract.canonical_yes_side_index
         )
+        no_coin = outcome_coin(
+            self.contract.outcome_id, self.contract.canonical_no_side_index
+        )
         local = self.hyperliquid.l2_book(
             local_coin,
             queried_side_payout="yes",
             mapping_id=self.contract.mapping_id,
         )
+        # The No token trades on its own separate order book. Fetch it too (in
+        # canonical-Yes terms) so a quote routed through either native token can
+        # be checked against the resting liquidity it would actually cross. Each
+        # entry is that coin's canonical (best_bid, best_ask); an empty side
+        # reads as 0/1, i.e. nothing to cross.
+        local_no = self.hyperliquid.l2_book(
+            no_coin,
+            queried_side_payout="no",
+            mapping_id=self.contract.mapping_id,
+        )
+        cross_guard = {
+            "yes": (local.bid, local.ask),
+            "no": (local_no.bid, local_no.ask),
+        }
         composite = self._reference_book()
 
         sample = self.basis.sample(local, composite.book, now_ms=now_ms)
@@ -381,7 +398,9 @@ class MarketMakerBot:
         self._maybe_record_basis_state(now_ms, basis_payload)
         if plan.accepted:
             self._emit_reconciliation_intents(
-                plan.legs, reservation_price=plan.reservation_price
+                plan.legs,
+                reservation_price=plan.reservation_price,
+                cross_guard=cross_guard,
             )
         else:
             self._emit_reconciliation_intents(())
@@ -868,6 +887,7 @@ class MarketMakerBot:
         legs: tuple[QuoteLeg, ...],
         *,
         reservation_price: Decimal | None = None,
+        cross_guard: dict[str, tuple[Decimal, Decimal]] | None = None,
     ) -> None:
         """Maintain price-sorted quote lists with asymmetric hysteresis.
 
@@ -992,6 +1012,7 @@ class MarketMakerBot:
         }
         place_back_levels = bool(self.trader.get("place_back_levels", True))
         submissions: list[tuple[QuoteLeg, str, str, ActionIntent]] = []
+        skipped_cross: list[QuoteLeg] = []
         for side in ("bid", "ask"):
             if not side_legs[side] or len(active[side]) >= capacities[side]:
                 continue
@@ -1006,6 +1027,12 @@ class MarketMakerBot:
                     abs(leg.effective_price - price) >= rung_spacing
                     for price in occupied_prices
                 ):
+                    continue
+                # Post-only orders are rejected if they would immediately match.
+                # Skip any leg whose price would cross the resting liquidity on the
+                # native book it routes to, so we never submit a doomed order.
+                if cross_guard is not None and _leg_would_cross(leg, cross_guard):
+                    skipped_cross.append(leg)
                     continue
                 placements.append(leg)
                 occupied_prices.append(leg.effective_price)
@@ -1048,18 +1075,43 @@ class MarketMakerBot:
                     )
                 )
 
+        if skipped_cross:
+            self.recorder.record(
+                "quote_skipped_would_cross",
+                {
+                    "count": len(skipped_cross),
+                    "legs": [
+                        {
+                            "effective_side": leg.effective_side,
+                            "effective_price": leg.effective_price,
+                            "token_side": leg.token_side,
+                            "level": leg.level,
+                        }
+                        for leg in skipped_cross
+                    ],
+                },
+            )
         if not submissions:
             return
         results = self.sink.emit_batch(
             tuple(submission[3] for submission in submissions)
         )
-        rejected: list[str] = []
+        post_only_rejects: list[str] = []
+        other_rejects: list[str] = []
         reconcile_after_batch = False
         for (leg, coin, cloid, _), result in zip(
             submissions, results, strict=True
         ):
             if not result.accepted:
-                rejected.append(f"{cloid}: {result.status}")
+                # A rejected place put nothing on the book, so no exposure was
+                # taken and the leg is simply retried on a later cycle. Post-only
+                # "would immediately match" is a benign race; anything else (tick
+                # size, min notional, ...) is logged separately so it stays
+                # visible. Neither aborts the bot.
+                if _is_post_only_cross(result.status):
+                    post_only_rejects.append(f"{cloid}: {result.status}")
+                else:
+                    other_rejects.append(f"{cloid}: {result.status}")
                 continue
             if not self.is_live:
                 simulated = OpenOrder(
@@ -1117,10 +1169,20 @@ class MarketMakerBot:
                 )
             else:
                 reconcile_after_batch = True
+        if post_only_rejects:
+            self.recorder.record(
+                "place_rejected_post_only",
+                {"count": len(post_only_rejects), "orders": post_only_rejects},
+            )
+        if other_rejects:
+            self.recorder.record(
+                "place_rejected",
+                {"count": len(other_rejects), "orders": other_rejects},
+            )
         if reconcile_after_batch:
             self._reconcile(force=True)
-        if rejected:
-            raise RunnerError("place batch rejected orders: " + "; ".join(rejected))
+        # Place rejections are never fatal: nothing was placed, so there is no
+        # exposure to unwind. The leg is retried on a later cycle.
 
     def _managed_orders(self) -> tuple[OpenOrder, ...]:
         values = dict(self.simulated_orders)
@@ -1197,7 +1259,14 @@ class MarketMakerBot:
             elif order.cloid:
                 self.pending_market_cancels[order.cloid] = accepted_ms
         if rejected:
-            raise RunnerError("cancel batch rejected orders: " + "; ".join(rejected))
+            # Non-fatal: a rejected cancel simply was not marked pending, so it is
+            # retried on the next cycle and reconciled against REST. Do not abort;
+            # aborting would not cancel the order either, and shutdown retries all
+            # cancels anyway.
+            self.recorder.record(
+                "cancel_rejected",
+                {"count": len(rejected), "orders": rejected},
+            )
 
     def _available_cloid(
         self, coin: str, effective_side: str, used_cloids: set[str]
@@ -1330,6 +1399,32 @@ def _risk_limits(risk: Mapping[str, Any]) -> RiskLimits:
     return RiskLimits(
         max_position=Decimal(str(risk["max_position"])),
     )
+
+
+def _leg_would_cross(
+    leg: QuoteLeg, cross_guard: Mapping[str, tuple[Decimal, Decimal]]
+) -> bool:
+    """True if this post-only leg would immediately match resting liquidity.
+
+    cross_guard maps each native token side to the canonical (best_bid, best_ask)
+    of that token's own book. A bid crosses when its price reaches the best ask;
+    an ask crosses when its price reaches the best bid. Routing an effective quote
+    through the Yes or the No token yields the same canonical condition, so only
+    the routed token's book matters. A missing side defaults to 0/1 (nothing to
+    cross).
+    """
+
+    best_bid, best_ask = cross_guard.get(leg.token_side, (Decimal(0), Decimal(1)))
+    if leg.effective_side == "bid":
+        return leg.effective_price >= best_ask
+    return leg.effective_price <= best_bid
+
+
+def _is_post_only_cross(status: Any) -> bool:
+    """Recognize Hyperliquid's post-only-would-immediately-match rejection."""
+
+    text = str(status).lower()
+    return "post only" in text and "immediately match" in text
 
 
 def _book_payload(book: CanonicalBook) -> dict[str, Any]:

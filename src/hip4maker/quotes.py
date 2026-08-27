@@ -207,11 +207,26 @@ def _route_leg(
     complement_notional = (ONE - effective_price) * size
     if direct_notional >= MIN_ORDER_NOTIONAL:
         token_side = "yes"
+        # The caller already tick-rounds the canonical price, so the Yes native
+        # price (which equals it) is directly submittable.
+        native_price = effective_price
     elif complement_notional >= MIN_ORDER_NOTIONAL:
         token_side = "no"
+        # A No-routed leg submits the complement 1 - p, which must itself land on
+        # the venue tick (five significant figures) -- the complement of a valid
+        # five-figure canonical price can otherwise carry six figures and be
+        # rejected. Round the native price, not the canonical, in the non-crossing
+        # direction (a No sell rounds up, a No buy rounds down), then re-derive the
+        # effective price so native == 1 - effective still holds exactly.
+        native_rounding = ROUND_DOWN if effective_side == "ask" else ROUND_UP
+        native_price = _round_probability(ONE - effective_price, native_rounding)
+        effective_price = ONE - native_price
+        # Re-rounding can nudge the native notional; drop the leg if it fell under
+        # the venue minimum rather than construct an invalid QuoteLeg.
+        if native_price * size < MIN_ORDER_NOTIONAL:
+            return None
     else:
         return None
-    native_price = effective_price if token_side == "yes" else ONE - effective_price
     is_buy = (effective_side == "bid") == (token_side == "yes")
     return QuoteLeg(
         level=level,
